@@ -75,7 +75,7 @@ foreach ($printerName in $PrinterNames) {
     Write-Host "Updating '$printerName' with new comment: '$comment'"
 
     # Apply the change
-    # Set-Printer -Name $printerName -Comment $comment
+    Set-Printer -Name $printerName -Comment $comment -WhatIf
 }
 
 Write-Host "Changes have been logged to: $LogFile"
