@@ -47,6 +47,7 @@ foreach ($printerName in $PrinterNames) {
         try {
             $resolvedIP = (Resolve-DnsName -Name $hostOrIP -ErrorAction Stop).IPAddress
         } catch {
+            Write-Host "Error resolving hostname '$hostOrIP': $_"
             $resolvedIP = "Unknown IP"
         }
     } else {
@@ -54,44 +55,26 @@ foreach ($printerName in $PrinterNames) {
     }
 
     # Clean the printer model name by removing "AltaLink", "VersaLink", "PCL6", and "Copier-Printer"
-    $cleanModel = $printer.DriverName -replace "AltaLink|VersaLink|PCL6|Copier-Printer", "" -replace "\s+", " " 
+    $cleanModel = if ($printer.DriverName) {
+        $printer.DriverName -replace "AltaLink|VersaLink|PCL6|Copier-Printer", "" -replace "\s+", " "
+    } else {
+        "Unknown Model"
+    }
 
     # Construct the new comment in the format: "PlanningUnit - Model - IP Address"
     $comment = "$planningUnit - $cleanModel - $resolvedIP".Trim()
 
-    # Ensure log file exists, otherwise create it with headers
-    if (-Not (Test-Path $LogFile)) {
-    "PrinterName,OriginalComment,UpdatedComment" | Out-File -FilePath $LogFile -Encoding utf8
-    }
-
-    # Read the first line of the log file to check headers
-    $existingHeaders = Get-Content -Path $LogFile -First 1
-
-    # If headers are incorrect/missing, recreate the file
-    if ($existingHeaders -notmatch "PrinterName,OriginalComment,UpdatedComment") {
-    "PrinterName,OriginalComment,UpdatedComment" | Out-File -FilePath $LogFile -Encoding utf8 -Force
-    }
-
-    # Format the log entry correctly
     # Format the log entry correctly and remove any newlines from comments
     $logEntry = '"{0}","{1}","{2}"' -f $printerName, ($currentComment -replace '[\r\n]+', ' ' -replace '"', '""'), ($comment -replace '"', '""')
 
-# Append the entry to the log file
-Add-Content -Path $LogFile -Value $logEntry
-
-
     # Append the entry to the log file
     Add-Content -Path $LogFile -Value $logEntry
-
-
-
-
 
     # Display current comment and the new comment to be applied
     Write-Host "Current Comment for '$printerName': '$currentComment'"
     Write-Host "Updating '$printerName' with new comment: '$comment'"
 
-    # Remove comment below to apply the change
+    # Apply the change
     # Set-Printer -Name $printerName -Comment $comment
 }
 
