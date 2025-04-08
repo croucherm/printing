@@ -1,3 +1,39 @@
+# This script updates the comments for a list of printers based on their names, IP addresses, and models.
+# It reads the printer names from a specified file, retrieves the current printer information,
+# constructs new comments in the format "PlanningUnit - Model - IP Address", and logs the changes.
+# The script uses the Get-Printer and Set-Printer cmdlets to interact with the printers,
+# and handles resolving hostnames to IP addresses.
+#
+# Usage:
+# 1. Ensure the printer list file is located at the specified path in $PrinterListFile. Currently, it's set to "E:\Scripts\PrinterComments\printerlist.txt".
+#    The file should contain one printer name per line.
+# 2. Run the script to update the printer comments and log the changes.
+# 3. The script will display the current and new comments for each printer and log the changes to a CSV file.
+# 4. The script uses the -WhatIf parameter with Set-Printer to simulate the changes without applying them. If you want to apply the changes, remove the -WhatIf parameter.
+#
+#Created by: Mike Croucher
+#Date: 2023-10-03
+#Version: 1.0
+
+# Check if the script is running with administrative privileges
+if (-Not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "This script requires administrative privileges. Please run it as an administrator."
+    exit
+}
+# Set the execution policy to allow script execution (if needed)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
+
+# Import the required module for printer management
+Import-Module PrintManagement -ErrorAction Stop
+
+# Check if the module was imported successfully
+if (-Not (Get-Module -Name PrintManagement)) {
+    Write-Host "Error: PrintManagement module could not be loaded. Ensure it is installed."
+    exit
+}
+# Set the error action preference to stop on errors for better error handling
+$ErrorActionPreference = "Stop"
+
 # Define the directory for script files
 $ScriptDir = "E:\Scripts\PrinterComments"
 
