@@ -20,7 +20,6 @@ def prompt_with_list_or_custom(title, prompt, options, custom_label="Other..."):
         # AppleScript text input dialog
         script = f'display dialog "Enter custom value:" with title "{title}" default answer ""'
         result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True)
-        # Parse AppleScript output, look for 'text returned:'
         m = re.search(r'text returned:(.*)', result.stdout)
         return m.group(1).strip() if m else ""
     return choice
@@ -38,25 +37,32 @@ def get_first_name(full_name):
     else:
         return full_name.split()[0]
 
+# === Helper: Extract "bare queue" by removing planning unit and .DMG/.dmg ===
+def extract_bare_queue(file_name):
+    # Remove .dmg/.DMG if present
+    name = re.sub(r'\.dmg$', '', file_name, flags=re.IGNORECASE)
+    # Extract bare queue
+    m = re.match(r"^YesAuth[-_]([^-_]+)[-_](.+)$", name)
+    if m:
+        return m.group(2)
+    else:
+        return name
+
 # === Load or Prompt Technician List ===
 technicians_file = os.path.expanduser("~/Downloads/PharosDMG/technicians.txt")
 if os.path.exists(technicians_file):
     with open(technicians_file) as f:
         technician_display_list = [line.strip() for line in f if line.strip()]
-    # Try to map to "Last, First" if using internal style
     technician_map = {}
     for t in technician_display_list:
         if ',' in t:
-            # Already in "Last, First"
             name = t
             display = f"{name.split(',')[1].strip()} {name.split(',')[0].strip()}"
             technician_map[display] = name
         else:
-            # Just use as display & internal
             technician_map[t] = t
     technician_display_list = list(technician_map.keys())
 else:
-    # Default entries
     technicians_internal = ["Croucher, Mike", "Tian, Zhiyong"]
     technician_map = {
         f"{name.split(',')[1].strip()} {name.split(',')[0].strip()}": name
@@ -79,21 +85,23 @@ if technician_full:
     warning_script = f'display dialog "{warning_message}" with title "Driver Installation Required" buttons {{"OK"}} default button "OK"'
     subprocess.run(['osascript', '-e', warning_script])
 
-# === Read Queues from File or Allow Custom ===
-queues_file = os.path.expanduser("~/Downloads/PharosDMG/queues.txt")
-if os.path.exists(queues_file):
-    with open(queues_file, "r") as f:
-        queues = [line.strip() for line in f if line.strip()]
+# === Select Package (which sets queue_name and output DMG name) ===
+packages_file = os.path.expanduser("~/Downloads/PharosDMG/packages.txt")
+if os.path.exists(packages_file):
+    with open(packages_file, "r") as f:
+        packages = [line.strip() for line in f if line.strip()]
 else:
-    queues = []
+    packages = []
 
-queue_name = prompt_with_list_or_custom("Queue", "Select the Pharos queue name:", queues)
+queue_name = prompt_with_list_or_custom("Queue", "Select the Pharos queue/package:", packages)
 if not queue_name:
-    print("❌ No queue name selected or entered.")
+    print("❌ No queue/package selected or entered.")
     exit()
 
-# === Generate Popup Name from Queue ===
-popup_name = queue_name.replace("YesAuth_", "") + "_Popup"
+# Remove any trailing .dmg or .DMG and normalize for further processing
+base_queue = re.sub(r'\.dmg$', '', queue_name, flags=re.IGNORECASE)
+bare_queue = extract_bare_queue(queue_name)
+popup_name = f"{bare_queue}_Popup"
 
 # === Read Servers from File or Allow Custom ===
 servers_file = os.path.expanduser("~/Downloads/PharosDMG/servers.txt")
@@ -140,8 +148,9 @@ sanitized_driver_filename = driver_filename.replace(" ", "")
 
 # === Directory Setup ===
 current_date = datetime.now().strftime("%m/%d/%Y")
-volume_name = queue_name
-dmg_name = f"{volume_name}.dmg"
+
+# === Use base_queue (from package name, w/o .dmg) for temp and volume ===
+volume_name = base_queue
 temp_dir = f"/tmp/{volume_name}"
 
 if os.path.exists(temp_dir):
@@ -155,7 +164,7 @@ destination_ppd = os.path.join(custom_dir, sanitized_driver_filename)
 with open(destination_ppd, "wb") as out_f:
     subprocess.run(["gunzip", "-c", source_ppd_gz], stdout=out_f)
 
-# === Copy Installer.pkg ===
+# === Copy "Installer.pkg" as before (since actual payload not changed) ===
 installer_src = os.path.expanduser("~/Downloads/PharosDMG/Installer.pkg")
 installer_dst = os.path.join(temp_dir, "Installer.pkg")
 if os.path.exists(installer_src):
@@ -173,28 +182,23 @@ with open(install_txt_path, "w") as f:
     f.write("#\n")
     f.write(f"/etc/cups/ppd/{sanitized_driver_filename}\n")
 
-# === Create PostInstall.sh, using sanitized name and the chosen server ===
+# === Create PostInstall.sh, using bare queue and the chosen server ===
 postinstall_path = os.path.join(custom_dir, "PostInstall.sh")
-# Remove planning unit prefix (up to and including the first '-')
-if '-' in popup_name:
-    popup_name_no_unit = popup_name.split('-', 1)[1]
-else:
-    popup_name_no_unit = popup_name
 
 with open(postinstall_path, "w") as f:
     f.write("# Install print queue in CUPS\n")
     f.write("#\n")
     f.write(f"# {technician_full} -- {current_date}\n")
     f.write("#\n")
-    f.write(f"lpadmin -p {popup_name_no_unit} -v popup://PS1.ohio.edu/{queue_name} -E -P {driver_filename}\n")
+    f.write(f"lpadmin -p {popup_name} -v popup://{server}/{base_queue} -E -P {driver_filename}\n")
 
 # === Create DMG ===
 output_dir = os.path.expanduser("~/Downloads/PharosDMG")
 os.makedirs(output_dir, exist_ok=True)
-dmg_path = os.path.join(output_dir, dmg_name)
+dmg_path = os.path.join(output_dir, queue_name if queue_name.lower().endswith('.dmg') else queue_name + '.dmg')
 
 if os.path.exists(dmg_path):
-    overwrite = prompt_yes_no("Overwrite DMG", f"The file {dmg_name} already exists. Overwrite?")
+    overwrite = prompt_yes_no("Overwrite DMG", f"The file {os.path.basename(dmg_path)} already exists. Overwrite?")
     if not overwrite:
         print("❌ Operation cancelled by user.")
         exit()
