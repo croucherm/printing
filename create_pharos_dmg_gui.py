@@ -109,7 +109,7 @@ if os.path.exists(servers_file):
     with open(servers_file, "r") as f:
         servers = [line.strip() for line in f if line.strip()]
 else:
-    servers = ["ps1.ohio.edu", "ps2.ohio.edu", "psb.ohio.edu"]
+    servers = ["PS1.ohio.edu", "PS2.ohio.edu", "PSB.ohio.edu"]
 
 server = prompt_with_list_or_custom("Server", "Select the print server:", servers)
 if not server:
