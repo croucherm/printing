@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# Logging setup
+log_file="/Library/Logs/FullPrintingReset.log"
+exec > >(tee -a "$log_file") 2>&1
+echo "===== Full Printing System Reset Started: $(date) ====="
+
+# Backup directory
+backup_dir="/Library/PrinterBackup"
+mkdir -p "$backup_dir"
+
+echo "Backing up CUPS configuration files..."
+cups_config_files=(
+    /private/etc/cups/printers.conf
+    /private/etc/cups/printers.conf.O
+    /private/etc/cups/classes.conf
+    /private/etc/cups/classes.conf.O
+    /private/etc/cups/cupsd.conf
+    /private/etc/cups/cupsd.conf.bak
+    /private/etc/cups/cups-files.conf
+    /private/etc/cups/cups-files.conf.bak
+    /private/etc/cups/printers.conf.pre-update
+    /private/etc/cups/cupsd.conf.pre-update
+    /private/etc/cups/snmp.conf
+    /private/etc/cups/pharos.convs
+)
+
+for file in "${cups_config_files[@]}"; do
+    if [ -f "$file" ]; then
+        cp "$file" "$backup_dir/"
+        echo "Backed up: $file"
+    else
+        echo "File not found (skipped): $file"
+    fi
+done
+
+echo "Stopping CUPS..."
+launchctl stop org.cups.cupsd
+
+echo "Removing all printers..."
+lpstat -p | awk '{print $2}' | while read printer; do
+    lpadmin -x "$printer"
+done
+
+echo "Removing CUPS config files..."
+for file in "${cups_config_files[@]}"; do
+    if [ -f "$file" ]; then
+        rm -f "$file"
+        echo "Deleted: $file"
+    fi
+done
+echo "Restoring default config files if available..."
+default_files=(
+    "cups-files.conf"
+    "cupsd.conf"
+    "snmp.conf"
+)
+
+for file in "${default_files[@]}"; do
+    default_path="/private/etc/cups/${file}.default"
+    target_path="/private/etc/cups/${file}"
+    if [ -f "$default_path" ]; then
+        cp "$default_path" "$target_path"
+        echo "Restored $file from default."
+    else
+        echo "Default file not found for $file (skipped)."
+    fi
+done
+
+echo "Removing PPD files..."
+rm -rf /private/etc/cups/ppd/*
+
+echo "Removing job history and logs..."
+rm -rf /private/var/spool/cups/*
+rm -rf /private/var/log/cups/*
+
+echo "Restarting CUPS..."
+launchctl start org.cups.cupsd
+
+echo "Waiting for CUPS to fully initialize..."
+timeout=30
+elapsed=0
+
+while ! lpstat -r | grep -q "scheduler is running" && [ $elapsed -lt $timeout ]; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+done
+
+if lpstat -r | grep -q "scheduler is running"; then
+    echo "CUPS restarted and is running."
+else
+    echo "⚠️ CUPS did not start within $timeout seconds. Please check configuration or restore from backup."
+    exit 1
+fi
+echo "===== Full Printing System Reset Completed: $(date) ====="
